@@ -1,6 +1,6 @@
 streamlit
 pandas
 Pillow
-streamlit-gsheets
+gspread
+google-auth
 google-genai
-openpyxl

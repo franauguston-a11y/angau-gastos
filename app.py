@@ -54,7 +54,7 @@ if imagen_subida is not None:
                     '"total": 0.00}'
                 )
 
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                model = genai.GenerativeModel("gemini-3.6-flash")
                 response = model.generate_content([image, prompt])
 
                 # Limpiar texto por si devuelve formato markdown

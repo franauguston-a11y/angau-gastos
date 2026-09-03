@@ -5,7 +5,7 @@ import streamlit as st
 from PIL import Image
 import google.generativeai as genai
 
-# Configuración de la página
+# Configuración de la página y título personalizado
 st.set_page_config(
     page_title="Angaú Cervecería - Control de Gastos",
     page_icon="🍻",
@@ -40,7 +40,8 @@ imagen_subida = st.file_uploader(
 
 if imagen_subida is not None:
     image = Image.open(imagen_subida)
-    st.image(image, caption="Comprobante cargado", use_column_width=True)
+    # Corregido para usar la propiedad compatible con la versión actual de Streamlit
+    st.image(image, caption="Comprobante cargado", use_container_width=True)
 
     if st.button("Analizar Comprobante con IA", type="primary"):
         with st.spinner("Procesando ticket con Gemini..."):

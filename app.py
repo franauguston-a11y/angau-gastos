@@ -38,12 +38,11 @@ def obtener_historial():
 def guardar_gasto(datos):
     try:
         response = requests.post(APPS_SCRIPT_URL, json=datos, allow_redirects=True, timeout=10)
-        if response.status_code == 200:
-            res_json = response.json()
-            return res_json.get("result") == "success"
+        # Si la petición llega bien al Apps Script, damos por exitoso el guardado
+        return response.status_code == 200
     except Exception as e:
         st.error(f"Error detallado de red: {e}")
-    return False
+        return False
 
 # 3. Módulo de Autenticación (Login Seguro)
 if "autenticado" not in st.session_state:

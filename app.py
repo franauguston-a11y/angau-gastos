@@ -3,14 +3,7 @@ import json
 import pandas as pd
 import streamlit as st
 from PIL import Image
-
-# Importación segura para Streamlit Cloud
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    st.error("⚠️ La librería 'google-genai' no está instalada en el entorno. Verificá el archivo requirements.txt.")
-    st.stop()
+import google.generativeai as genai
 
 # Configuración de la página
 st.set_page_config(
@@ -33,7 +26,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Gemini. Configura los Secrets en Streamlit Cloud.")
     st.stop()
 
-client = genai.Client(api_key=api_key)
+genai.configure(api_key=api_key)
 
 # Inicializar base de datos temporal en sesión si no existe
 if "gastos" not in st.session_state:
@@ -60,15 +53,17 @@ if imagen_subida is not None:
                     '"total": 0.00}'
                 )
 
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=[image, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json"
-                    ),
-                )
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content([image, prompt])
 
-                resultado_json = json.loads(response.text)
+                # Limpiar texto por si devuelve formato markdown
+                texto_respuesta = response.text.strip()
+                if texto_respuesta.startswith("```json"):
+                    texto_respuesta = texto_respuesta[7:]
+                if texto_respuesta.endswith("```"):
+                    texto_respuesta = texto_respuesta[:-3]
+
+                resultado_json = json.loads(texto_respuesta.strip())
 
                 # Guardar en la sesión
                 st.session_state.gastos.append(resultado_json)

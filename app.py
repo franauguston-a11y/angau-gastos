@@ -28,9 +28,19 @@ if not api_key:
 
 genai.configure(api_key=api_key)
 
-# Inicializar base de datos temporal en sesión si no existe
+# Archivo persistente en la nube para guardar los gastos
+EXCEL_FILE = "gastos_angau.xlsx"
+
+# Cargar gastos existentes desde el archivo en la nube si existe
 if "gastos" not in st.session_state:
-    st.session_state.gastos = []
+    if os.path.exists(EXCEL_FILE):
+        try:
+            df_guardado = pd.read_excel(EXCEL_FILE)
+            st.session_state.gastos = df_guardado.to_dict(orient="records")
+        except Exception:
+            st.session_state.gastos = []
+    else:
+        st.session_state.gastos = []
 
 # Sección de carga de comprobantes
 st.markdown("### 📥 Subir Nuevo Comprobante")
@@ -40,7 +50,6 @@ imagen_subida = st.file_uploader(
 
 if imagen_subida is not None:
     image = Image.open(imagen_subida)
-    # Corregido para usar la propiedad compatible con la versión actual de Streamlit
     st.image(image, caption="Comprobante cargado", use_container_width=True)
 
     if st.button("Analizar Comprobante con IA", type="primary"):
@@ -54,7 +63,7 @@ if imagen_subida is not None:
                     '"total": 0.00}'
                 )
 
-                model = genai.GenerativeModel("gemini-3.6-flash")
+                model = genai.GenerativeModel("gemini-1.5-flash")
                 response = model.generate_content([image, prompt])
 
                 # Limpiar texto por si devuelve formato markdown
@@ -66,9 +75,12 @@ if imagen_subida is not None:
 
                 resultado_json = json.loads(texto_respuesta.strip())
 
-                # Guardar en la sesión
+                # Guardar en la sesión y actualizar el archivo Excel en la nube
                 st.session_state.gastos.append(resultado_json)
-                st.success("¡Comprobante procesado y registrado con éxito!")
+                df_temp = pd.DataFrame(st.session_state.gastos)
+                df_temp.to_excel(EXCEL_FILE, index=False)
+
+                st.success("¡Comprobante procesado, registrado y guardado en la nube con éxito!")
                 st.json(resultado_json)
 
             except Exception as e:
@@ -81,19 +93,13 @@ if st.session_state.gastos:
     df = pd.DataFrame(st.session_state.gastos)
     st.dataframe(df, use_container_width=True)
 
-    # Botón para exportar a Excel
-    @st.cache_data
-    def convertir_a_excel(df_gastos):
-        import io
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df_gastos.to_excel(writer, index=False, sheet_name="Gastos")
-        return output.getvalue()
+    # Botón para descargar el Excel actualizado desde la nube
+    with open(EXCEL_FILE, "rb") as f:
+        excel_bytes = f.read()
 
-    excel_data = convertir_a_excel(df)
     st.download_button(
-        label="📥 Descargar planilla en Excel",
-        data=excel_data,
-        file_name="angau_gastos.xlsx",
+        label="📥 Descargar planilla completa actualizada",
+        data=excel_bytes,
+        file_name="angau_gastos_actualizado.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

@@ -63,7 +63,8 @@ if imagen_subida is not None:
                     '"total": 0.00}'
                 )
 
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                # Usando el modelo optimizado de alta precisión para imágenes
+                model = genai.GenerativeModel("gemini-2.5-flash")
                 response = model.generate_content([image, prompt])
 
                 # Limpiar texto por si devuelve formato markdown
@@ -94,12 +95,13 @@ if st.session_state.gastos:
     st.dataframe(df, use_container_width=True)
 
     # Botón para descargar el Excel actualizado desde la nube
-    with open(EXCEL_FILE, "rb") as f:
-        excel_bytes = f.read()
+    if os.path.exists(EXCEL_FILE):
+        with open(EXCEL_FILE, "rb") as f:
+            excel_bytes = f.read()
 
-    st.download_button(
-        label="📥 Descargar planilla completa actualizada",
-        data=excel_bytes,
-        file_name="angau_gastos_actualizado.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        st.download_button(
+            label="📥 Descargar planilla completa actualizada",
+            data=excel_bytes,
+            file_name="angau_gastos_actualizado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )

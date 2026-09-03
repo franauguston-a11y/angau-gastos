@@ -1,11 +1,8 @@
-import os
 import json
 import pandas as pd
 import streamlit as st
 from PIL import Image
-import gspread
-from google.oauth2.service_account import Credentials
-import google.genai as genai
+from google import genai
 
 # Configuración de la página
 st.set_page_config(
@@ -14,38 +11,22 @@ st.set_page_config(
     layout="centered",
 )
 
-# 1. Configuración de Credenciales y Secretos
+# 1. Configuración de Gemini 3.6 Flash
 GEMINI_MODEL = "gemini-3.6-flash"
 
-api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
+api_key = st.secrets.get("GEMINI_API_KEY")
 if not api_key:
     st.error("⚠️ No se encontró la API Key de Gemini en los Secrets.")
     st.stop()
 
-# Configurar cliente de Gemini con la SDK moderna
 client_ai = genai.Client(api_key=api_key)
 
-# 2. Conexión a Google Sheets (Base de Datos en la Nube)
-@st.cache_resource
-def conectar_google_sheets():
-    try:
-        # Lee las credenciales de Google Sheets desde los secrets de Streamlit
-        gcp_secrets = dict(st.secrets["gcp_service_account"])
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        credentials = Credentials.from_service_account_info(gcp_secrets, scopes=scopes)
-        gc = gspread.authorize(credentials)
-        
-        # Abre la planilla 'angau_gastos'
-        sheet = gc.open("angau_gastos").sheet1
-        return sheet
-    except Exception as e:
-        st.error(f"Error al conectar con Google Sheets: {e}")
-        return None
-
-sheet = conectar_google_sheets()
+# 2. Conexión a Google Sheets mediante la herramienta nativa de Streamlit
+try:
+    conn = st.connection("gsheets", type="gsheets")
+except Exception as e:
+    st.error(f"Error al inicializar la conexión con Google Sheets: {e}")
+    conn = None
 
 # 3. Módulo de Autenticación (Login Seguro)
 if "autenticado" not in st.session_state:
@@ -61,7 +42,6 @@ if not st.session_state.autenticado:
         submit_login = st.form_submit_button("Ingresar")
         
         if submit_login:
-            # Definí tus credenciales seguras en Streamlit Secrets o validalas directo aquí
             user_valido = st.secrets.get("AUTH_USER", "admin")
             pass_valida = st.secrets.get("AUTH_PASSWORD", "angau2026")
             
@@ -72,11 +52,10 @@ if not st.session_state.autenticado:
                 st.error("Usuario o contraseña incorrectos.")
     st.stop()
 
-# --- APLICACIÓN PRINCIPAL (Una vez logueado) ---
+# --- APLICACIÓN PRINCIPAL ---
 st.title("🍻 Angaú Cervecería")
 st.subheader("Control de Gastos y Comprobantes")
 
-# Botón para cerrar sesión
 if st.sidebar.button("Cerrar Sesión"):
     st.session_state.autenticado = False
     st.rerun()
@@ -102,7 +81,6 @@ if imagen_subida is not None:
                     '"total": 0.00}'
                 )
 
-                # Llamada al modelo gemini-3.6-flash
                 response = client_ai.models.generate_content(
                     model=GEMINI_MODEL,
                     contents=[image, prompt]
@@ -116,17 +94,15 @@ if imagen_subida is not None:
 
                 resultado_json = json.loads(texto_respuesta.strip())
 
-                # Guardar directamente en Google Sheets en la nube
-                if sheet:
-                    sheet.append_row([
-                        str(resultado_json.get("fecha", "")),
-                        str(resultado_json.get("proveedor", "")),
-                        str(resultado_json.get("categoria", "")),
-                        str(resultado_json.get("total", 0.0))
-                    ])
+                # Guardar en Google Sheets de forma automática
+                if conn:
+                    df_actual = conn.read(ttl=0)
+                    nuevo_registro = pd.DataFrame([resultado_json])
+                    df_actual = pd.concat([df_actual, nuevo_registro], ignore_index=True)
+                    conn.update(data=df_actual)
                     st.success("¡Comprobante procesado y guardado en Google Sheets con éxito!")
                 else:
-                    st.warning("El ticket se procesó pero no se pudo conectar con la planilla.")
+                    st.warning("El ticket se procesó pero la conexión a Google Sheets no está activa.")
 
                 st.json(resultado_json)
 
@@ -137,18 +113,12 @@ if imagen_subida is not None:
 st.markdown("---")
 st.markdown("### 📊 Historial de Gastos en la Nube")
 
-if sheet:
+if conn:
     try:
-        data = sheet.get_all_records()
-        if data:
-            df = pd.DataFrame(data)
-            st.dataframe(df, use_container_width=True)
+        df_historial = conn.read(ttl=0)
+        if not df_historial.empty:
+            st.dataframe(df_historial, use_container_width=True)
         else:
-            info_inicial = sheet.get_all_values()
-            if len(info_inicial) > 1:
-                df = pd.DataFrame(info_inicial[1:], columns=info_inicial[0])
-                st.dataframe(df, use_container_width=True)
-            else:
-                st.info("La planilla está vacía. Sube tu primer ticket arriba.")
+            st.info("La planilla está vacía. Sube tu primer ticket arriba.")
     except Exception as e:
-        st.error(f"No se pudo cargar el historial desde Google Sheets: {e}")
+        st.error(f"No se pudo leer el historial desde Google Sheets: {e}")

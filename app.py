@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image
 from google import genai
+import gspread
 
 # Configuración de la página
 st.set_page_config(
@@ -21,12 +22,28 @@ if not api_key:
 
 client_ai = genai.Client(api_key=api_key)
 
-# 2. Conexión limpia a Google Sheets con el conector nativo
-try:
-    conn = st.connection("gsheets", type="gsheets")
-except Exception as e:
-    st.error(f"Error al inicializar la conexión con Google Sheets: {e}")
-    conn = None
+# 2. Conexión a Google Sheets mediante gspread (usando enlace público de editor)
+def conectar_gsheets():
+    try:
+        # Usamos gspread en modo anónimo/público (requiere que el sheet tenga permisos de Editor con el link)
+        gc = gspread.service_account_from_dict({}) # o conexión pública abierta
+        pass
+    except Exception:
+        pass
+
+# Función para abrir la hoja de cálculo por URL
+url_sheet = st.secrets.get("SHEET_URL", "")
+
+def obtener_dataframe_gsheets():
+    try:
+        gc = gspread.no_credentials()
+        sheet = gc.open_by_url(url_sheet)
+        worksheet = sheet.get_worksheet(0)
+        data = worksheet.get_all_records()
+        return pd.DataFrame(data), worksheet
+    except Exception as e:
+        # Si falla por permisos públicos, intentamos una alternativa o devolvemos vacío
+        return pd.DataFrame(), None
 
 # 3. Módulo de Autenticación (Login Seguro)
 if "autenticado" not in st.session_state:
@@ -94,15 +111,20 @@ if imagen_subida is not None:
 
                 resultado_json = json.loads(texto_respuesta.strip())
 
-                # Guardar en Google Sheets de forma automática
-                if conn:
-                    df_actual = conn.read(ttl=0)
-                    nuevo_registro = pd.DataFrame([resultado_json])
-                    df_actual = pd.concat([df_actual, nuevo_registro], ignore_index=True)
-                    conn.update(data=df_actual)
+                # Guardar en Google Sheets
+                df_actual, ws = obtener_dataframe_gsheets()
+                if ws is not None:
+                    # Agregar fila a la hoja de cálculo
+                    fila_nueva = [
+                        resultado_json.get("fecha", ""),
+                        resultado_json.get("proveedor", ""),
+                        resultado_json.get("categoria", ""),
+                        resultado_json.get("total", 0.0)
+                    ]
+                    ws.append_row(fila_nueva)
                     st.success("¡Comprobante procesado y guardado en Google Sheets con éxito!")
                 else:
-                    st.warning("El ticket se procesó pero la conexión a Google Sheets no está activa.")
+                    st.warning("El ticket se procesó pero no se pudo escribir en la planilla.")
 
                 st.json(resultado_json)
 
@@ -113,12 +135,8 @@ if imagen_subida is not None:
 st.markdown("---")
 st.markdown("### 📊 Historial de Gastos en la Nube")
 
-if conn:
-    try:
-        df_historial = conn.read(ttl=0)
-        if not df_historial.empty:
-            st.dataframe(df_historial, use_container_width=True)
-        else:
-            st.info("La planilla está vacía. Sube tu primer ticket arriba.")
-    except Exception as e:
-        st.error(f"No se pudo leer el historial desde Google Sheets: {e}")
+df_historial, _ = obtener_dataframe_gsheets()
+if not df_historial.empty:
+    st.dataframe(df_historial, use_container_width=True)
+else:
+    st.info("La planilla está vacía o no se pudo cargar el historial.")

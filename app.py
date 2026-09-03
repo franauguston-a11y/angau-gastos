@@ -3,46 +3,85 @@ import json
 import pandas as pd
 import streamlit as st
 from PIL import Image
-import google.generativeai as genai
+import gspread
+from google.oauth2.service_account import Credentials
+import google.genai as genai
 
-# Configuración de la página y título personalizado
+# Configuración de la página
 st.set_page_config(
     page_title="Angaú Cervecería - Control de Gastos",
     page_icon="🍻",
     layout="centered",
 )
 
+# 1. Configuración de Credenciales y Secretos
+GEMINI_MODEL = "gemini-3.6-flash"
+
+api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
+if not api_key:
+    st.error("⚠️ No se encontró la API Key de Gemini en los Secrets.")
+    st.stop()
+
+# Configurar cliente de Gemini con la SDK moderna
+client_ai = genai.Client(api_key=api_key)
+
+# 2. Conexión a Google Sheets (Base de Datos en la Nube)
+@st.cache_resource
+def conectar_google_sheets():
+    try:
+        # Lee las credenciales de Google Sheets desde los secrets de Streamlit
+        gcp_secrets = dict(st.secrets["gcp_service_account"])
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        credentials = Credentials.from_service_account_info(gcp_secrets, scopes=scopes)
+        gc = gspread.authorize(credentials)
+        
+        # Abre la planilla 'angau_gastos'
+        sheet = gc.open("angau_gastos").sheet1
+        return sheet
+    except Exception as e:
+        st.error(f"Error al conectar con Google Sheets: {e}")
+        return None
+
+sheet = conectar_google_sheets()
+
+# 3. Módulo de Autenticación (Login Seguro)
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    st.title("🍻 Angaú Cervecería")
+    st.subheader("Acceso Restringido - Control de Gastos")
+    
+    with st.form("login_form"):
+        usuario = st.text_input("Usuario")
+        password = st.text_input("Contraseña", type="password")
+        submit_login = st.form_submit_button("Ingresar")
+        
+        if submit_login:
+            # Definí tus credenciales seguras en Streamlit Secrets o validalas directo aquí
+            user_valido = st.secrets.get("AUTH_USER", "admin")
+            pass_valida = st.secrets.get("AUTH_PASSWORD", "angau2026")
+            
+            if usuario == user_valido and password == pass_valida:
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.error("Usuario o contraseña incorrectos.")
+    st.stop()
+
+# --- APLICACIÓN PRINCIPAL (Una vez logueado) ---
 st.title("🍻 Angaú Cervecería")
 st.subheader("Control de Gastos y Comprobantes")
 
-# Configurar API Key de Gemini
-api_key = None
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-elif "GEMINI_API_KEY" in os.environ:
-    api_key = os.environ["GEMINI_API_KEY"]
+# Botón para cerrar sesión
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state.autenticado = False
+    st.rerun()
 
-if not api_key:
-    st.error("⚠️ No se encontró la API Key de Gemini. Configura los Secrets en Streamlit Cloud.")
-    st.stop()
-
-genai.configure(api_key=api_key)
-
-# Archivo persistente en la nube para guardar los gastos
-EXCEL_FILE = "gastos_angau.xlsx"
-
-# Cargar gastos existentes desde el archivo en la nube si existe
-if "gastos" not in st.session_state:
-    if os.path.exists(EXCEL_FILE):
-        try:
-            df_guardado = pd.read_excel(EXCEL_FILE)
-            st.session_state.gastos = df_guardado.to_dict(orient="records")
-        except Exception:
-            st.session_state.gastos = []
-    else:
-        st.session_state.gastos = []
-
-# Sección de carga de comprobantes
+# Carga de comprobantes
 st.markdown("### 📥 Subir Nuevo Comprobante")
 imagen_subida = st.file_uploader(
     "Sacá una foto o subí el ticket/factura", type=["jpg", "jpeg", "png"]
@@ -53,7 +92,7 @@ if imagen_subida is not None:
     st.image(image, caption="Comprobante cargado", use_container_width=True)
 
     if st.button("Analizar Comprobante con IA", type="primary"):
-        with st.spinner("Procesando ticket con Gemini..."):
+        with st.spinner("Procesando ticket con Gemini 3.6 Flash..."):
             try:
                 prompt = (
                     "Analiza este comprobante de gasto para un negocio gastronómico/cervecero. "
@@ -63,11 +102,12 @@ if imagen_subida is not None:
                     '"total": 0.00}'
                 )
 
-                # Usando el modelo optimizado de alta precisión para imágenes
-                model = genai.GenerativeModel("gemini-3.6-flash")
-                response = model.generate_content([image, prompt])
+                # Llamada al modelo gemini-3.6-flash
+                response = client_ai.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=[image, prompt]
+                )
 
-                # Limpiar texto por si devuelve formato markdown
                 texto_respuesta = response.text.strip()
                 if texto_respuesta.startswith("```json"):
                     texto_respuesta = texto_respuesta[7:]
@@ -76,32 +116,39 @@ if imagen_subida is not None:
 
                 resultado_json = json.loads(texto_respuesta.strip())
 
-                # Guardar en la sesión y actualizar el archivo Excel en la nube
-                st.session_state.gastos.append(resultado_json)
-                df_temp = pd.DataFrame(st.session_state.gastos)
-                df_temp.to_excel(EXCEL_FILE, index=False)
+                # Guardar directamente en Google Sheets en la nube
+                if sheet:
+                    sheet.append_row([
+                        str(resultado_json.get("fecha", "")),
+                        str(resultado_json.get("proveedor", "")),
+                        str(resultado_json.get("categoria", "")),
+                        str(resultado_json.get("total", 0.0))
+                    ])
+                    st.success("¡Comprobante procesado y guardado en Google Sheets con éxito!")
+                else:
+                    st.warning("El ticket se procesó pero no se pudo conectar con la planilla.")
 
-                st.success("¡Comprobante procesado, registrado y guardado en la nube con éxito!")
                 st.json(resultado_json)
 
             except Exception as e:
                 st.error(f"Ocurrió un error al procesar la imagen: {e}")
 
-# Visualización de gastos registrados
-if st.session_state.gastos:
-    st.markdown("---")
-    st.markdown("### 📊 Historial de Gastos Registrados")
-    df = pd.DataFrame(st.session_state.gastos)
-    st.dataframe(df, use_container_width=True)
+# Visualización del Historial desde Google Sheets
+st.markdown("---")
+st.markdown("### 📊 Historial de Gastos en la Nube")
 
-    # Botón para descargar el Excel actualizado desde la nube
-    if os.path.exists(EXCEL_FILE):
-        with open(EXCEL_FILE, "rb") as f:
-            excel_bytes = f.read()
-
-        st.download_button(
-            label="📥 Descargar planilla completa actualizada",
-            data=excel_bytes,
-            file_name="angau_gastos_actualizado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+if sheet:
+    try:
+        data = sheet.get_all_records()
+        if data:
+            df = pd.DataFrame(data)
+            st.dataframe(df, use_container_width=True)
+        else:
+            info_inicial = sheet.get_all_values()
+            if len(info_inicial) > 1:
+                df = pd.DataFrame(info_inicial[1:], columns=info_inicial[0])
+                st.dataframe(df, use_container_width=True)
+            else:
+                st.info("La planilla está vacía. Sube tu primer ticket arriba.")
+    except Exception as e:
+        st.error(f"No se pudo cargar el historial desde Google Sheets: {e}")

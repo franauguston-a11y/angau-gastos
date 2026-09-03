@@ -1,5 +1,7 @@
 streamlit
-google-generativeai
 pandas
-pillow
+Pillow
+gspread
+google-auth
+google-genai
 openpyxl

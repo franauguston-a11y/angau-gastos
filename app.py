@@ -3,7 +3,14 @@ import json
 import pandas as pd
 import streamlit as st
 from PIL import Image
-import google.generativeai as genai
+
+# Importación segura para Streamlit Cloud
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    st.error("⚠️ La librería 'google-genai' no está instalada en el entorno. Verificá el archivo requirements.txt.")
+    st.stop()
 
 # Configuración de la página
 st.set_page_config(
@@ -26,7 +33,7 @@ if not api_key:
     st.error("⚠️ No se encontró la API Key de Gemini. Configura los Secrets en Streamlit Cloud.")
     st.stop()
 
-genai.configure(api_key=api_key)
+client = genai.Client(api_key=api_key)
 
 # Inicializar base de datos temporal en sesión si no existe
 if "gastos" not in st.session_state:
@@ -47,23 +54,21 @@ if imagen_subida is not None:
             try:
                 prompt = (
                     "Analiza este comprobante de gasto para un negocio gastronómico/cervecero. "
-                    "Extrae la siguiente información en formato JSON estricto (sin bloques de código extra ni texto adicional): "
+                    "Extrae la siguiente información en formato JSON estricto: "
                     '{"fecha": "YYYY-MM-DD o desconocido", "proveedor": "Nombre del comercio", '
                     '"categoria": "Insumos/Materia Prima, Logística, Servicios, Mantenimiento, u Otros", '
                     '"total": 0.00}'
                 )
 
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                response = model.generate_content([image, prompt])
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[image, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    ),
+                )
 
-                # Limpiar texto por si devuelve formato markdown
-                texto_respuesta = response.text.strip()
-                if texto_respuesta.startswith("```json"):
-                    texto_respuesta = texto_respuesta[7:]
-                if texto_respuesta.endswith("```"):
-                    texto_respuesta = texto_respuesta[:-3]
-
-                resultado_json = json.loads(texto_respuesta.strip())
+                resultado_json = json.loads(response.text)
 
                 # Guardar en la sesión
                 st.session_state.gastos.append(resultado_json)

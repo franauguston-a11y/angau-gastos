@@ -64,7 +64,7 @@ if imagen_subida is not None:
                 )
 
                 # Usando el modelo optimizado de alta precisión para imágenes
-                model = genai.GenerativeModel("gemini-2.5-flash")
+                model = genai.GenerativeModel("gemini-3.6-flash")
                 response = model.generate_content([image, prompt])
 
                 # Limpiar texto por si devuelve formato markdown

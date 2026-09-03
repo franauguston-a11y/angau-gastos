@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # 1. Configuración de Gemini 3.6 Flash
-GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 api_key = st.secrets.get("GEMINI_API_KEY")
 if not api_key:
